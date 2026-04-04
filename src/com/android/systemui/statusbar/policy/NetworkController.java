@@ -21,6 +21,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.res.Resources;
+import android.database.ContentObserver;
 import android.net.ConnectivityManager;
 import android.net.NetworkInfo;
 import android.net.wifi.WifiConfiguration;
@@ -54,6 +55,7 @@ import java.util.List;
 import java.util.Locale;
 
 public class NetworkController extends BroadcastReceiver implements DemoMode {
+    private static final String KEY_CUSTOM_CARRIER_LABEL = "custom_carrier_label";
     // debug
     static final String TAG = "StatusBar.NetworkController";
     static final boolean DEBUG = false;
@@ -74,6 +76,7 @@ public class NetworkController extends BroadcastReceiver implements DemoMode {
     SignalStrength mSignalStrength;
     int[] mDataIconList = TelephonyIcons.DATA_G[0];
     String mNetworkName;
+    String mNetworkNameBase;
     String mNetworkNameDefault;
     String mNetworkNameSeparator;
     int mPhoneSignalIconId;
@@ -133,6 +136,14 @@ public class NetworkController extends BroadcastReceiver implements DemoMode {
 
     private Locale mLocale = null;
     private Locale mLastLocale = null;
+
+    private final ContentObserver mCustomCarrierLabelObserver = new ContentObserver(new Handler()) {
+        @Override
+        public void onChange(boolean selfChange) {
+            updateCarrierLabelFromSettings();
+            refreshViews();
+        }
+    };
 
     // our ui
     Context mContext;
@@ -207,7 +218,8 @@ public class NetworkController extends BroadcastReceiver implements DemoMode {
         mNetworkNameSeparator = mContext.getString(R.string.status_bar_network_name_separator);
         mNetworkNameDefault = mContext.getString(
                 com.android.internal.R.string.lockscreen_carrier_default);
-        mNetworkName = mNetworkNameDefault;
+        mNetworkNameBase = mNetworkNameDefault;
+        mNetworkName = applyCustomCarrierLabel(mNetworkNameBase);
 
         // wifi
         mWifiManager = (WifiManager) context.getSystemService(Context.WIFI_SERVICE);
@@ -237,6 +249,11 @@ public class NetworkController extends BroadcastReceiver implements DemoMode {
             filter.addAction(WimaxManagerConstants.NET_4G_STATE_CHANGED_ACTION);
         }
         context.registerReceiver(this, filter);
+
+        mContext.getContentResolver().registerContentObserver(
+                Settings.System.getUriFor(KEY_CUSTOM_CARRIER_LABEL),
+                false,
+                mCustomCarrierLabelObserver);
 
         // AIRPLANE_MODE_CHANGED is sent at boot; we've probably already missed it
         updateAirplaneMode();
@@ -337,12 +354,12 @@ public class NetworkController extends BroadcastReceiver implements DemoMode {
                 // Wimax is special
                 cb.onMobileDataSignalChanged(true, mQSPhoneSignalIconId,
                         mContentDescriptionPhoneSignal, mQSDataTypeIconId, mobileIn, mobileOut,
-                        mContentDescriptionDataType, mNetworkName);
+                        mContentDescriptionDataType, applyCustomCarrierLabel(mNetworkNameBase));
             } else {
                 // Normal mobile data
                 cb.onMobileDataSignalChanged(mHasMobileDataFeature, mQSPhoneSignalIconId,
                         mContentDescriptionPhoneSignal, mQSDataTypeIconId, mobileIn, mobileOut,
-                        mContentDescriptionDataType, mNetworkName);
+                        mContentDescriptionDataType, applyCustomCarrierLabel(mNetworkNameBase));
             }
         }
         cb.onAirplaneModeChanged(mAirplaneMode);
@@ -789,10 +806,35 @@ public class NetworkController extends BroadcastReceiver implements DemoMode {
             something = true;
         }
         if (something) {
-            mNetworkName = str.toString();
+            mNetworkNameBase = str.toString();
         } else {
-            mNetworkName = mNetworkNameDefault;
+            mNetworkNameBase = mNetworkNameDefault;
         }
+        mNetworkName = applyCustomCarrierLabel(mNetworkNameBase);
+    }
+
+    private String getCustomCarrierLabel() {
+        String value = Settings.System.getString(mContext.getContentResolver(),
+                KEY_CUSTOM_CARRIER_LABEL);
+        if (value != null) {
+            value = value.trim();
+        }
+        return (value != null && value.length() > 0) ? value : null;
+    }
+
+    private String applyCustomCarrierLabel(String baseLabel) {
+        String customLabel = getCustomCarrierLabel();
+        if (customLabel != null) {
+            return customLabel;
+        }
+        if (baseLabel != null && baseLabel.length() > 0) {
+            return baseLabel;
+        }
+        return mNetworkNameDefault;
+    }
+
+    private void updateCarrierLabelFromSettings() {
+        mNetworkName = applyCustomCarrierLabel(mNetworkNameBase);
     }
 
     // ===== Wifi ===================================================================
@@ -1005,11 +1047,11 @@ public class NetworkController extends BroadcastReceiver implements DemoMode {
             // Otherwise (nothing connected) we show "No internet connection".
 
             if (mDataConnected) {
-                mobileLabel = mNetworkName;
+                mobileLabel = applyCustomCarrierLabel(mNetworkNameBase);
             } else if (mConnected || emergencyOnly) {
                 if (hasService() || emergencyOnly) {
                     // The isEmergencyOnly test covers the case of a phone with no SIM
-                    mobileLabel = mNetworkName;
+                    mobileLabel = applyCustomCarrierLabel(mNetworkNameBase);
                 } else {
                     // Tablets, basically
                     mobileLabel = "";
@@ -1274,6 +1316,8 @@ public class NetworkController extends BroadcastReceiver implements DemoMode {
         pw.println(mLastSignalLevel);
         pw.print("  mNetworkName=");
         pw.println(mNetworkName);
+        pw.print("  mNetworkNameBase=");
+        pw.println(mNetworkNameBase);
         pw.print("  mNetworkNameDefault=");
         pw.println(mNetworkNameDefault);
         pw.print("  mNetworkNameSeparator=");
