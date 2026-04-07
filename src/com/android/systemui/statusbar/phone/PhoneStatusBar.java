@@ -49,6 +49,7 @@ import android.graphics.PorterDuff;
 import android.graphics.Rect;
 import android.graphics.drawable.Drawable;
 import android.inputmethodservice.InputMethodService;
+import android.net.TrafficStats;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.IBinder;
@@ -106,6 +107,7 @@ import com.android.systemui.statusbar.policy.RotationLockController;
 import java.io.FileDescriptor;
 import java.io.PrintWriter;
 import java.util.ArrayList;
+import java.util.Locale;
 
 public class PhoneStatusBar extends BaseStatusBar implements DemoMode {
     static final String TAG = "PhoneStatusBar";
@@ -268,6 +270,10 @@ public class PhoneStatusBar extends BaseStatusBar implements DemoMode {
         : null;
 
     private int mNavigationIconHints = 0;
+    private TextView mNetworkSpeedView;
+    private long mLastNetworkSpeedTotalBytes = 0L;
+    private long mLastNetworkSpeedSampleTime = 0L;
+
     private final Animator.AnimatorListener mMakeIconsInvisible = new AnimatorListenerAdapter() {
         @Override
         public void onAnimationEnd(Animator animation) {
@@ -340,6 +346,36 @@ public class PhoneStatusBar extends BaseStatusBar implements DemoMode {
             }
         }};
 
+    private final Runnable mNetworkSpeedUpdater = new Runnable() {
+        @Override
+        public void run() {
+            if (mNetworkSpeedView == null) return;
+
+            long rx = TrafficStats.getTotalRxBytes();
+            long tx = TrafficStats.getTotalTxBytes();
+            long total = 0L;
+            if (rx != TrafficStats.UNSUPPORTED) total += rx;
+            if (tx != TrafficStats.UNSUPPORTED) total += tx;
+
+            long now = SystemClock.elapsedRealtime();
+            long elapsed = now - mLastNetworkSpeedSampleTime;
+            long delta = total - mLastNetworkSpeedTotalBytes;
+
+            float kbps = 0f;
+            if (elapsed > 0 && total >= 0) {
+                kbps = (delta * 1000f) / elapsed / 1024f;
+                if (kbps < 0f) kbps = 0f;
+            }
+
+            mNetworkSpeedView.setText(String.format(Locale.US, "%.2f\nkb/s", kbps));
+
+            mLastNetworkSpeedTotalBytes = total;
+            mLastNetworkSpeedSampleTime = now;
+            mHandler.removeCallbacks(this);
+            mHandler.postDelayed(this, 1000);
+        }
+    };
+
     @Override
     public void start() {
         mDisplay = ((WindowManager)mContext.getSystemService(Context.WINDOW_SERVICE))
@@ -391,6 +427,15 @@ public class PhoneStatusBar extends BaseStatusBar implements DemoMode {
 
         mStatusBarView = (PhoneStatusBarView) mStatusBarWindow.findViewById(R.id.status_bar);
         mStatusBarView.setBar(this);
+
+        mNetworkSpeedView = (TextView) mStatusBarView.findViewById(R.id.network_speed);
+        if (mNetworkSpeedView != null) {
+            mNetworkSpeedView.setText("0.00\nkb/s");
+            mLastNetworkSpeedTotalBytes = 0L;
+            mLastNetworkSpeedSampleTime = SystemClock.elapsedRealtime();
+            mHandler.removeCallbacks(mNetworkSpeedUpdater);
+            mHandler.post(mNetworkSpeedUpdater);
+        }
 
         PanelHolder holder = (PanelHolder) mStatusBarWindow.findViewById(R.id.panel_holder);
         mStatusBarView.setPanelHolder(holder);
