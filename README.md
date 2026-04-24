@@ -1,3 +1,7 @@
+# !!! this repository is deprecated, and is going to be downloadable for ZenithOS 3.0 only. ZenithOS 4.0+ - here: frameworks_base_packages
+
+
+
 # SystemUI
 
 “Everything you see in Android that's not an app”
